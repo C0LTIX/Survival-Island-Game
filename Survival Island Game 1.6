@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Survival Island Realistic Player</title>
+<style>
+body{margin:0;overflow:hidden;font-family:Arial;}
+#hud{
+  position:absolute;top:10px;left:10px;color:white;background:rgba(0,0,0,0.5);padding:10px;z-index:1;
+}
+</style>
+</head>
+<body>
+<div id="hud">
+Hunger: <span id="hunger">100</span>% | Health: <span id="health">100</span>% | Wood: <span id="wood">0</span> | Food: <span id="food">0</span>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.152/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.152/examples/js/loaders/GLTFLoader.js"></script>
+<script>
+
+// --- SCENE, CAMERA, RENDERER ---
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+camera.position.set(0,10,20);
+camera.lookAt(0,0,0);
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+// --- LIGHT ---
+const ambient = new THREE.AmbientLight(0xffffff,0.8);
+scene.add(ambient);
+const sun = new THREE.DirectionalLight(0xffffff,0.6);
+sun.position.set(10,20,10);
+scene.add(sun);
+
+// --- TERRAIN ---
+const terrain = new THREE.Mesh(
+  new THREE.PlaneGeometry(200,200,50,50),
+  new THREE.MeshStandardMaterial({color:0x3d8f2d})
+);
+terrain.rotation.x = -Math.PI/2;
+terrain.receiveShadow = true;
+scene.add(terrain);
+
+// --- WATER ---
+const water = new THREE.Mesh(new THREE.PlaneGeometry(200,200), new THREE.MeshStandardMaterial({color:0x1e90ff,transparent:true,opacity:0.5}));
+water.rotation.x = -Math.PI/2;
+water.position.y = -1;
+scene.add(water);
+
+// --- TREES ---
+for(let i=0;i<20;i++){
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.5,0.7,10), new THREE.MeshStandardMaterial({color:0x8b5a2b}));
+  trunk.position.set(Math.random()*50-25,5,Math.random()*50-25);
+  scene.add(trunk);
+  const leaf = new THREE.Mesh(new THREE.SphereGeometry(3), new THREE.MeshStandardMaterial({color:0x1f7a1f}));
+  leaf.position.set(trunk.position.x,10,trunk.position.z);
+  scene.add(leaf);
+}
+
+// --- FRUITS ---
+const foods = [];
+for(let i=0;i<10;i++){
+  const f = new THREE.Mesh(new THREE.SphereGeometry(0.5), new THREE.MeshStandardMaterial({color:0xff00ff}));
+  f.position.set(Math.random()*50-25,1,Math.random()*50-25);
+  scene.add(f); foods.push(f);
+}
+
+// --- ANIMALS ---
+const pigs=[],sharks=[];
+for(let i=0;i<5;i++){
+  const pig = new THREE.Mesh(new THREE.BoxGeometry(1,0.5,0.5), new THREE.MeshStandardMaterial({color:0xffb6b6}));
+  pig.position.set(Math.random()*50-25,0.25,Math.random()*50-25); scene.add(pig); pigs.push(pig);
+}
+for(let i=0;i<2;i++){
+  const s = new THREE.Mesh(new THREE.BoxGeometry(3,1,1), new THREE.MeshStandardMaterial({color:0x4444ff}));
+  s.position.set(Math.random()*50-25,-0.5,Math.random()*50-25); scene.add(s); sharks.push(s);
+}
+
+// --- SURVIVAL STATS ---
+let hunger=100, health=100, wood=0, foodCount=0;
+const hungerEl = document.getElementById("hunger");
+const healthEl = document.getElementById("health");
+function updateStats(){hungerEl.innerText=Math.floor(hunger); healthEl.innerText=Math.floor(health);}
+
+// --- PLAYER: GLTF MODEL ---
+let player;
+const loader = new THREE.GLTFLoader();
+// Low-poly humanoid model hosted online
+loader.load('https://rawcdn.githack.com/KhronosGroup/glTF-Sample-Models/master/2.0/Monster/glTF/Monster.gltf',
+function(gltf){
+  player = gltf.scene;
+  player.scale.set(0.5,0.5,0.5);
+  player.position.set(0,0,0);
+  scene.add(player);
+}, undefined, function(error){console.error(error);});
+
+// --- CAMERA FOLLOW ---
+let yaw = new THREE.Object3D();
+let pitch = new THREE.Object3D();
+yaw.position.y = 10; yaw.add(pitch); scene.add(yaw);
+pitch.add(camera);
+
+// --- MOUSE LOOK ---
+const sensitivity = 0.002;
+const pitchLimit = Math.PI/3;
+document.body.addEventListener('click',()=>{document.body.requestPointerLock()});
+document.addEventListener('pointerlockchange',()=>{if(document.pointerLockElement===document.body) document.addEventListener('mousemove',onMouseMove,false); else document.removeEventListener('mousemove',onMouseMove,false)});
+function onMouseMove(e){yaw.rotation.y-=e.movementX*sensitivity; pitch.rotation.x-=e.movementY*sensitivity; pitch.rotation.x=Math.max(-pitchLimit,Math.min(pitchLimit,pitch.rotation.x))}
+
+// --- MOVEMENT ---
+const keys={}; document.addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=true}); document.addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false});
+
+// --- ANIMAL AI ---
+function updateAnimals(){
+  if(!player) return;
+  for(let p of pigs){
+    let dist = player.position.distanceTo(p.position);
+    let dir = new THREE.Vector3(Math.random()-0.5,0,Math.random()-0.5);
+    if(dist<5){dir.subVectors(p.position,player.position).normalize();}
+    p.position.add(dir.multiplyScalar(0.1));
+  }
+  for(let s of sharks){
+    if(player.position.y<0){
+      let dir = new THREE.Vector3().subVectors(player.position,s.position).normalize().multiplyScalar(0.08);
+      s.position.add(dir);
+      if(s.position.distanceTo(player.position)<3) health -= 0.5;
+    }else{
+      s.position.add(new THREE.Vector3(Math.random()-0.5,0,Math.random()-0.5).multiplyScalar(0.05));
+    }
+  }
+}
+
+// --- ANIMATE LOOP ---
+function animate(){
+  requestAnimationFrame(animate);
+  if(player) yaw.position.copy(player.position); yaw.position.y=10;
+
+  // MOVEMENT
+  if(player){
+    let speed=0.5;
+    let forward=new THREE.Vector3(0,0,-1).applyQuaternion(yaw.quaternion);
+    let right=new THREE.Vector3(1,0,0).applyQuaternion(yaw.quaternion);
+    let dir=new THREE.Vector3();
+    if(keys["w"]) dir.add(forward);
+    if(keys["s"]) dir.sub(forward);
+    if(keys["a"]) dir.sub(right);
+    if(keys["d"]) dir.add(right);
+    if(dir.length()>0) player.position.addScaledVector(dir.normalize(),speed);
+  }
+
+  // HUNGER
+  hunger -=0.002; if(hunger<=0){health-=0.05; hunger=0;} if(health<0) health=0;
+
+  // ANIMALS
+  updateAnimals();
+
+  updateStats();
+  renderer.render(scene,camera);
+}
+animate();
+
+// --- RESIZE ---
+window.addEventListener('resize',()=>{camera.aspect=window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth,window.innerHeight)});
+
+</script>
+</body>
+</html>
