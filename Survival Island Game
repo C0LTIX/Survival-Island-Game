@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Survival Island Ultimate</title>
+<style>
+body{margin:0;overflow:hidden;font-family:Arial}
+#hud{
+position:absolute;top:10px;left:10px;color:white;
+background:rgba(0,0,0,0.5);padding:10px;z-index:1;
+}
+#settingsMenu{
+position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+background:rgba(0,0,0,0.95);color:white;padding:20px;
+display:none;z-index:10;border-radius:10px;width:340px;
+}
+#settingsMenu h2{text-align:center;}
+.settingRow{margin:10px 0;display:flex;justify-content:space-between;align-items:center;}
+.settingRow input[type=range]{width:150px;}
+button{cursor:pointer;}
+</style>
+</head>
+<body>
+<div id="hud">
+WASD = Move | Mouse = Look | Click = Lock | Esc = Settings | Left Click = Chop/Pick | Right Click = Campfire/Cook<br>
+Hunger: <span id="hunger">100</span>% | Health: <span id="health">100</span>% | Wood: <span id="wood">0</span> | Food: <span id="food">0</span> | Campfires: <span id="campfires">0</span>
+</div>
+
+<div id="settingsMenu">
+<h2>Settings</h2>
+<div class="settingRow"><label>Shadows</label><select id="shadowSelect"><option value="on">On</option><option value="off">Off</option></select></div>
+<div class="settingRow"><label>Volume</label><input type="range" id="volumeSlider" min="0" max="100" value="50"></div>
+<div style="text-align:center;margin-top:15px"><button id="closeSettings">Close</button></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.152/build/three.min.js"></script>
+<script>
+// ---------------- SETTINGS ----------------
+const settingsMenu=document.getElementById("settingsMenu");
+const closeBtn=document.getElementById("closeSettings");
+let settingsOpen=false;
+document.addEventListener("keydown",e=>{if(e.key==="Escape"){settingsOpen=!settingsOpen;settingsMenu.style.display=settingsOpen?"block":"none"}});
+
+// ---------------- THREE.JS ----------------
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x87ceeb);
+scene.fog=new THREE.Fog(0x87ceeb,0,1000);
+
+const camera=new THREE.PerspectiveCamera(75,window.innerWidth/window.innerHeight,0.1,2000);
+camera.position.set(0,15,25);
+
+const renderer=new THREE.WebGLRenderer({antialias:false});
+renderer.setSize(window.innerWidth,window.innerHeight);
+renderer.shadowMap.enabled=true;
+document.body.appendChild(renderer.domElement);
+
+// LIGHTS
+const ambient=new THREE.AmbientLight(0xffffff,0.6); scene.add(ambient);
+const sun=new THREE.DirectionalLight(0xffffff,1); sun.position.set(100,200,100); sun.castShadow=true; scene.add(sun);
+
+// TERRAIN
+const terrainGeo=new THREE.PlaneGeometry(800,800,100,100);
+for(let i=0;i<terrainGeo.attributes.position.count;i++){
+  terrainGeo.attributes.position.setZ(i,Math.random()*5);
+}
+terrainGeo.computeVertexNormals();
+const terrainMat=new THREE.MeshStandardMaterial({color:0x3d8f2d});
+const terrain=new THREE.Mesh(terrainGeo,terrainMat); terrain.rotation.x=-Math.PI/2; terrain.receiveShadow=true; scene.add(terrain);
+
+// WATER
+const waterGeo=new THREE.PlaneGeometry(1000,1000);
+const waterMat=new THREE.MeshStandardMaterial({color:0x1e90ff,transparent:true,opacity:0.6});
+const water=new THREE.Mesh(waterGeo,waterMat); water.rotation.x=-Math.PI/2; water.position.y=-2; scene.add(water);
+
+// TREES
+const trees=[];
+function palm(x,z){
+  let trunk=new THREE.Mesh(new THREE.CylinderGeometry(.6,.8,15),new THREE.MeshStandardMaterial({color:0x8b5a2b}));
+  trunk.position.set(x,7.5,z); trunk.castShadow=true; scene.add(trunk); trees.push({mesh:trunk,wood:5});
+  for(let i=0;i<5;i++){
+    let leaf=new THREE.Mesh(new THREE.BoxGeometry(8,.3,2),new THREE.MeshStandardMaterial({color:0x1f7a1f}));
+    leaf.position.set(x,15,z); leaf.rotation.y=i*Math.PI/2.5; leaf.rotation.x=-0.7; scene.add(leaf);
+  }
+}
+for(let i=0;i<80;i++){palm(Math.random()*600-300,Math.random()*600-300)}
+
+// FRUITS
+const foods=[];
+function spawnFruit(){
+  const f=new THREE.Mesh(new THREE.SphereGeometry(0.5),new THREE.MeshStandardMaterial({color:0xff00ff}));
+  f.position.set(Math.random()*600-300,1,Math.random()*600-300); scene.add(f); foods.push(f);
+}
+for(let i=0;i<20;i++) spawnFruit();
+
+// CAMPFIRES
+let campfires=[];
+
+// 3D HUMANOID PLAYER
+const player=new THREE.Group();
+const body=new THREE.Mesh(new THREE.BoxGeometry(1,2,0.5),new THREE.MeshStandardMaterial({color:0x00ffff}));
+body.position.y=1; player.add(body);
+const head=new THREE.Mesh(new THREE.BoxGeometry(0.6,0.6,0.6),new THREE.MeshStandardMaterial({color:0xffffaa}));
+head.position.y=2.3; player.add(head);
+player.position.set(0,0,0);
+scene.add(player);
+
+// CAMERA FOLLOW
+let yaw=new THREE.Object3D(); let pitch=new THREE.Object3D(); yaw.position.y=10; yaw.add(pitch); scene.add(yaw); pitch.add(camera);
+
+// MOUSE LOOK
+const sensitivity=0.002; const pitchLimit=Math.PI/3;
+document.body.addEventListener('click',()=>{document.body.requestPointerLock()});
+document.addEventListener('pointerlockchange',()=>{if(document.pointerLockElement===document.body) document.addEventListener('mousemove',onMouseMove,false); else document.removeEventListener('mousemove',onMouseMove,false)});
+function onMouseMove(e){yaw.rotation.y-=e.movementX*sensitivity; pitch.rotation.x-=e.movementY*sensitivity; pitch.rotation.x=Math.max(-pitchLimit, Math.min(pitchLimit,pitch.rotation.x))}
+
+// MOVEMENT
+const keys={}; document.addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=true}); document.addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false});
+
+// SURVIVAL STATS
+let hunger=100,health=100,wood=0,food=0;
+const hungerEl=document.getElementById("hunger"),healthEl=document.getElementById("health"),woodEl=document.getElementById("wood"),foodEl=document.getElementById("food"),campfireEl=document.getElementById("campfires");
+function updateStats(){hungerEl.innerText=Math.floor(hunger); healthEl.innerText=Math.floor(health); woodEl.innerText=wood; foodEl.innerText=food; campfireEl.innerText=campfires.length}
+
+// CHOP TREES & PICK FRUITS
+function chopTree(){for(let t of trees){let d=player.position.distanceTo(t.mesh.position); if(d<5 && t.wood>0){wood+=t.wood; t.wood=0; t.mesh.material.color.set(0x555555); break;}}}
+function pickFood(){for(let i=0;i<foods.length;i++){let d=player.position.distanceTo(foods[i].position); if(d<3){scene.remove(foods[i]); foods.splice(i,1); food+=1; break;}}}
+
+// PLACE CAMPFIRE / COOK
+function placeCampfire(){if(wood>=3){const fire=new THREE.Mesh(new THREE.CylinderGeometry(1,1,0.5),new THREE.MeshStandardMaterial({color:0xff6600,emissive:0xff3300})); fire.position.copy(player.position); fire.position.y=0.25; scene.add(fire); campfires.push({mesh:fire,foodQueue:[]}); wood-=3;}}
+function cookFood(){for(let c of campfires){if(player.position.distanceTo(c.mesh.position)<5 && food>0){food-=1; setTimeout(()=>{food+=1;},3000);}}}
+
+// MOUSE ACTIONS
+document.addEventListener("mousedown",e=>{if(e.button===0){chopTree(); pickFood();} if(e.button===2){placeCampfire(); cookFood();}})
+
+// DAY/NIGHT
+let time=0; function updateDayNight(){time+=0.001; sun.position.set(Math.sin(time*2)*400,Math.cos(time*2)*400,100); ambient.intensity=Math.max(0.2,Math.sin(time*2)*0.5+0.3);}
+
+// ---------------- ANIMALS ----------------
+const pigs=[],sharks=[];
+function spawnPigs(n){for(let i=0;i<n;i++){const pig=new THREE.Mesh(new THREE.BoxGeometry(1,0.6,0.5),new THREE.MeshStandardMaterial({color:0xffb6b6})); pig.position.set(Math.random()*200-100,0.3,Math.random()*200-100); scene.add(pig); pigs.push(pig);}}
+function spawnSharks(n){for(let i=0;i<n;i++){const s=new THREE.Mesh(new THREE.BoxGeometry(3,1,1),new THREE.MeshStandardMaterial({color:0x4444ff})); s.position.set(Math.random()*200-100,-1,Math.random()*200-100); scene.add(s); sharks.push(s);}}
+spawnPigs(6); spawnSharks(3);
+
+function updateAnimals(){
+  for(let p of pigs){
+    // flee if player is close
+    let dist=player.position.distanceTo(p.position);
+    let dir=new THREE.Vector3(Math.random()-0.5,0,Math.random()-0.5);
+    if(dist<5){dir.subVectors(p.position,player.position).normalize();}
+    p.position.add(dir.multiplyScalar(0.1));
+  }
+  for(let s of sharks){
+    // chase player if in water
+    if(player.position.y<0){
+      let dir=new THREE.Vector3().subVectors(player.position,s.position).normalize().multiplyScalar(0.08);
+      s.position.add(dir);
+      if(s.position.distanceTo(player.position)<3) health-=0.5;
+    }else{
+      s.position.add(new THREE.Vector3(Math.random()-0.5,0,Math.random()-0.5).multiplyScalar(0.05));
+    }
+  }
+}
+
+// ---------------- ANIMATE ----------------
+function animate(){
+  requestAnimationFrame(animate);
+  updateDayNight();
+
+  // MOVEMENT
+  let speed=0.5;
+  let forward=new THREE.Vector3(0,0,-1).applyQuaternion(yaw.quaternion);
+  let right=new THREE.Vector3(1,0,0).applyQuaternion(yaw.quaternion);
+  let dir=new THREE.Vector3();
+  if(keys["w"]) dir.add(forward);
+  if(keys["s"]) dir.sub(forward);
+  if(keys["a"]) dir.sub(right);
+  if(keys["d"]) dir.add(right);
+  if(dir.length()>0) player.position.addScaledVector(dir.normalize(),speed);
+  yaw.position.copy(player.position); yaw.position.y=10;
+
+  // HUNGER
+  hunger-=0.002; if(hunger<=0){health-=0.05; hunger=0;} if(health<0) health=0;
+
+  updateAnimals();
+
+  updateStats();
+  renderer.render(scene,camera);
+}
+animate();
+
+// RESIZE
+window.addEventListener('resize',()=>{camera.aspect=window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth,window.innerHeight)})
+</script>
+</body>
+</html>
