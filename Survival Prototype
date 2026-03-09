@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Ultimate Survival Island - Full Version</title>
+<style>
+body{margin:0;overflow:hidden;font-family:Arial}
+#hud{
+position:absolute;top:10px;left:10px;color:white;
+background:rgba(0,0,0,0.4);padding:10px;z-index:1;
+}
+#settingsMenu{
+position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+background:rgba(0,0,0,0.95);color:white;padding:20px;
+display:none;z-index:10;border-radius:10px;width:340px;
+}
+#settingsMenu h2{text-align:center;}
+.settingRow{margin:10px 0;display:flex;justify-content:space-between;align-items:center;}
+.settingRow input[type=range]{width:150px;}
+button{cursor:pointer;}
+</style>
+</head>
+<body>
+<div id="hud">
+WASD = Move | Mouse = Look | Click = Lock | Esc = Settings | F11 = Fullscreen<br>
+Hunger: <span id="hunger">100</span>% | Health: <span id="health">100</span>% | Wood: <span id="wood">0</span> | Campfires: <span id="campfires">0</span>
+</div>
+
+<div id="settingsMenu">
+<h2>Settings</h2>
+<div class="settingRow"><label>Shadows</label><select id="shadowSelect"><option value="on">On</option><option value="off">Off</option></select></div>
+<div class="settingRow"><label>Water Detail</label><select id="waterSelect"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></div>
+<div class="settingRow"><label>Tree Density</label><select id="treeSelect"><option value="few">Few</option><option value="medium">Medium</option><option value="many">Many</option></select></div>
+<div class="settingRow"><label>Forward</label><button id="bindForward">W</button></div>
+<div class="settingRow"><label>Back</label><button id="bindBack">S</button></div>
+<div class="settingRow"><label>Left</label><button id="bindLeft">A</button></div>
+<div class="settingRow"><label>Right</label><button id="bindRight">D</button></div>
+<div class="settingRow"><label>Volume</label><input type="range" id="volumeSlider" min="0" max="100" value="50"></div>
+<div style="text-align:center;margin-top:15px"><button id="closeSettings">Close</button></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.152/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.152/examples/js/objects/Water.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.152/examples/js/objects/Sky.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.152/examples/js/loaders/GLTFLoader.js"></script>
+
+<script>
+// ------------------ SETTINGS ------------------
+const settingsMenu=document.getElementById("settingsMenu");
+const closeBtn=document.getElementById("closeSettings");
+let settingsOpen=false;
+document.addEventListener("keydown",e=>{if(e.key==="Escape"){settingsOpen=!settingsOpen;settingsMenu.style.display=settingsOpen?"block":"none"}});
+
+const shadowSelect=document.getElementById("shadowSelect");
+const waterSelect=document.getElementById("waterSelect");
+const treeSelect=document.getElementById("treeSelect");
+
+const bindButtons={forward:document.getElementById("bindForward"),back:document.getElementById("bindBack"),left:document.getElementById("bindLeft"),right:document.getElementById("bindRight")}
+let keyBindings={forward:"w",back:"s",left:"a",right:"d"};
+for(const dir in bindButtons){bindButtons[dir].addEventListener("click",()=>{bindButtons[dir].innerText="Press key...";const keyListener=e=>{keyBindings[dir]=e.key.toLowerCase();bindButtons[dir].innerText=e.key.toUpperCase();document.removeEventListener("keydown",keyListener)};document.addEventListener("keydown",keyListener)})}
+
+const volumeSlider=document.getElementById("volumeSlider");
+closeBtn.addEventListener("click",()=>{settingsOpen=false;settingsMenu.style.display="none"});
+
+// ------------------ THREE.JS SCENE ------------------
+const scene=new THREE.Scene(); scene.fog=new THREE.Fog(0x87ceeb,200,1500);
+const camera=new THREE.PerspectiveCamera(75,window.innerWidth/window.innerHeight,0.1,10000); camera.position.set(0,15,25);
+const renderer=new THREE.WebGLRenderer({antialias:true}); renderer.setSize(window.innerWidth,window.innerHeight);
+renderer.shadowMap.enabled=true; renderer.physicallyCorrectLights=true;
+document.body.appendChild(renderer.domElement);
+
+// Sun & ambient
+const sun=new THREE.DirectionalLight(0xffffff,2); sun.position.set(300,400,200); sun.castShadow=true; scene.add(sun);
+const ambient=new THREE.AmbientLight(0xffffff,0.3); scene.add(ambient);
+
+// Sky
+const sky=new THREE.Sky(); sky.scale.setScalar(10000); scene.add(sky);
+const skyUniforms=sky.material.uniforms;
+skyUniforms['turbidity'].value=10; skyUniforms['rayleigh'].value=2; skyUniforms['mieCoefficient'].value=0.005; skyUniforms['mieDirectionalG'].value=0.8;
+
+// Terrain
+const terrainGeo=new THREE.PlaneGeometry(800,800,200,200); const verts=terrainGeo.attributes.position;
+for(let i=0;i<verts.count;i++){let x=verts.getX(i),y=verts.getY(i);let dist=Math.sqrt(x*x+y*y)/400; verts.setZ(i,(Math.random()*10)*(1-dist))}
+terrainGeo.computeVertexNormals();
+const terrainMat=new THREE.MeshStandardMaterial({color:0x3d8f2d});
+const island=new THREE.Mesh(terrainGeo,terrainMat); island.rotation.x=-Math.PI/2; island.receiveShadow=true; scene.add(island);
+
+// Water
+const waterGeometry=new THREE.PlaneGeometry(10000,10000);
+const water=new THREE.Water(waterGeometry,{textureWidth:512,textureHeight:512,waterNormals:new THREE.TextureLoader().load('https://threejs.org/examples/textures/waternormals.jpg',t=>{t.wrapS=t.wrapT=THREE.RepeatWrapping}),sunDirection:sun.position.clone().normalize(),sunColor:0xffffff,waterColor:0x1e90ff,distortionScale:3,fog:scene.fog!==undefined});
+water.rotation.x=-Math.PI/2; water.position.y=-2; scene.add(water);
+
+// Trees
+const trees=[]; function palm(x,z){let trunk=new THREE.Mesh(new THREE.CylinderGeometry(.6,.8,20),new THREE.MeshStandardMaterial({color:0x8b5a2b})); trunk.position.set(x,10,z); trunk.castShadow=true; scene.add(trunk); trees.push({mesh:trunk,wood:5}); for(let i=0;i<7;i++){let leaf=new THREE.Mesh(new THREE.BoxGeometry(12,.3,2),new THREE.MeshStandardMaterial({color:0x1f7a1f})); leaf.position.set(x,20,z); leaf.rotation.y=i*Math.PI/3.5; leaf.rotation.x=-0.7; scene.add(leaf)}}
+for(let i=0;i<120;i++){palm(Math.random()*600-300,Math.random()*600-300)}
+
+// Player
+let player; const loader=new THREE.GLTFLoader(); loader.load("https://threejs.org/examples/models/gltf/RobotExpressive/RobotExpressive.glb",g=>{player=g.scene;player.scale.set(.7,.7,.7);player.position.set(0,0,0);scene.add(player)});
+
+// Camera
+let pitchObject=new THREE.Object3D(),yawObject=new THREE.Object3D(); yawObject.position.y=10; yawObject.add(pitchObject); scene.add(yawObject); pitchObject.add(camera)
+const sensitivity=0.002, pitchLimit=Math.PI/3;
+document.body.addEventListener('click',()=>{document.body.requestPointerLock()});
+document.addEventListener('pointerlockchange',()=>{if(document.pointerLockElement===document.body) document.addEventListener('mousemove',onMouseMove,false); else document.removeEventListener('mousemove',onMouseMove,false)});
+function onMouseMove(e){yawObject.rotation.y -= e.movementX*sensitivity; pitchObject.rotation.x -= e.movementY*sensitivity; pitchObject.rotation.x=Math.max(-pitchLimit,Math.min(pitchLimit,pitchObject.rotation.x))}
+
+// Movement
+const keys={};
+document.addEventListener("keydown",e=>{keys[e.key.toLowerCase()]=true});
+document.addEventListener("keyup",e=>{keys[e.key.toLowerCase()]=false});
+
+// Survival stats
+let hunger=100,health=100,wood=0; const hungerEl=document.getElementById("hunger"),healthEl=document.getElementById("health"),woodEl=document.getElementById("wood"),campfireEl=document.getElementById("campfires");
+function updateStats(){hungerEl.innerText=Math.floor(hunger); healthEl.innerText=Math.floor(health); woodEl.innerText=wood; campfireEl.innerText=campfires.length}
+
+// Animals
+const animals=[]; function spawnPig(){const pig=new THREE.Mesh(new THREE.BoxGeometry(2,1,1),new THREE.MeshStandardMaterial({color:0xffb6b6})); pig.position.set(Math.random()*200-100,1,Math.random()*200-100); scene.add(pig); animals.push(pig);}
+for(let i=0;i<6;i++) spawnPig();
+
+const sharks=[]; function spawnShark(){const s=new THREE.Mesh(new THREE.ConeGeometry(1.5,4),new THREE.MeshStandardMaterial({color:0x555555})); s.position.set(Math.random()*600-300,-1,Math.random()*600-300); s.rotation.x=Math.PI/2; scene.add(s); sharks.push(s);}
+for(let i=0;i<4;i++) spawnShark();
+
+// Sounds
+const listener=new THREE.AudioListener(); camera.add(listener)
+const oceanSound=new THREE.Audio(listener),rainSound=new THREE.Audio(listener),fireSound=new THREE.Audio(listener)
+const audioLoader=new THREE.AudioLoader();
+audioLoader.load('https://www.fesliyanstudios.com/play-mp3/387',buffer=>{oceanSound.setBuffer(buffer);oceanSound.setLoop(true);oceanSound.setVolume(volumeSlider.value/100);oceanSound.play()})
+audioLoader.load('https://www.fesliyanstudios.com/play-mp3/542',buffer=>{rainSound.setBuffer(buffer);rainSound.setLoop(true);rainSound.setVolume(volumeSlider.value/100)})
+audioLoader.load('https://www.fesliyanstudios.com/play-mp3/689',buffer=>{fireSound.setBuffer(buffer);fireSound.setLoop(true);fireSound.setVolume(volumeSlider.value/100)})
+volumeSlider.addEventListener('input',()=>{oceanSound.setVolume(volumeSlider.value/100); rainSound.setVolume(volumeSlider.value/100); fireSound.setVolume(volumeSlider.value/100)})
+
+// Time & weather
+let time=0; const sunPivot=new THREE.Object3D(); sunPivot.add(sun); scene.add(sunPivot); let raining=false; let rainParticles=[]
+function updateDayNight(){
+  time+=0.001; sunPivot.rotation.z=time*2;
+  ambient.intensity = Math.max(0.1,Math.sin(time*2)*0.5+0.3);
+  scene.background=new THREE.Color(0x87ceeb).lerp(new THREE.Color(0x000022),1-Math.max(0,Math.sin(time)));
+  // Rain toggle
+  if(Math.random()<0.0005) {raining=!raining; if(raining) rainSound.play(); else rainSound.stop();}
+}
+
+// Campfires
+let campfires=[]
+function placeCampfire(){
+  if(wood>=3){
+    const fire=new THREE.Mesh(new THREE.CylinderGeometry(1,1,0.5),new THREE.MeshStandardMaterial({color:0xff6600,emissive:0xff3300})); fire.position.copy(player.position); fire.position.y=0.25; scene.add(fire); campfires.push(fire); wood-=3; fireSound.play()}
+}
+
+// Chop trees
+function chopTree(){
+  for(let t of trees){
+    let d=player.position.distanceTo(t.mesh.position);
+    if(d<5 && t.wood>0){wood+=t.wood; t.wood=0; t.mesh.material.color.set(0x555555); break}
+  }
+}
+
+// Mouse click actions
+document.addEventListener("mousedown",e=>{
+  if(e.button===0){chopTree()}
+  if(e.button===2){placeCampfire()}
+})
+
+// Animate
+function animate(){
+  requestAnimationFrame(animate)
+  updateDayNight()
+  water.material.uniforms['time'].value+=1/60;
+
+  // Animals
+  animals.forEach(a=>{a.position.x+=Math.sin(time+a.id)*0.02; a.position.z+=Math.cos(time+a.id)*0.02})
+  sharks.forEach(s=>{let dir=new THREE.Vector3().subVectors(player.position,s.position); dir.y=0; dir.normalize(); s.position.addScaledVector(dir,0.05)})
+
+  // Player movement
+  if(player){
+    let speed=.7; let forward=new THREE.Vector3(0,0,-1),right=new THREE.Vector3(1,0,0); forward.applyQuaternion(yawObject.quaternion); right.applyQuaternion(yawObject.quaternion);
+    let moveDir=new THREE.Vector3();
+    if(keys[keyBindings.forward]) moveDir.add(forward);
+    if(keys[keyBindings.back]) moveDir.sub(forward);
+    if(keys[keyBindings.left]) moveDir.sub(right);
+    if(keys[keyBindings.right]) moveDir.add(right);
+    if(moveDir.length()>0){moveDir.normalize();player.position.addScaledVector(moveDir,speed); let targetAngle=Math.atan2(moveDir.x,moveDir.z); player.rotation.y+=angleDifference(targetAngle,player.rotation.y)*0.1}
+    yawObject.position.copy(player.position); yawObject.position.y=10
+  }
+
+  // Hunger
+  hunger-=0.005; if(hunger<=0){health-=0.05; hunger=0} if(health<0) health=0; updateStats();
+
+  renderer.render(scene,camera)
+}
+animate();
+
+function angleDifference(a,b){let diff=a-b; while(diff<-Math.PI) diff+=2*Math.PI; while(diff>Math.PI) diff-=2*Math.PI; return diff}
+
+// Resize
+window.addEventListener('resize',()=>{camera.aspect=window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth,window.innerHeight)})
+</script>
+</body>
+</html>
